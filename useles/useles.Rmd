@@ -1,0 +1,219 @@
+---
+title: "useles"
+output: html_document
+---
+
+
+Функция для построения оптимальных ARMA моделей
+
+```{r}
+list = c()
+
+archi <- function(x){
+  for (p in 0:5){
+    for (q in 0:5){
+      
+      ARMA = tryCatch(Arima(x, c(p, 0, q), include.constant = TRUE, method = c("CSS-ML")), error = function(e) NULL)
+
+      autocorr = tryCatch(Box.test(residuals(ARMA), lag = log(length(x)), type = c("Ljung-Box"), fitdf = p+q)$p.value, error = function(e) NULL)
+      autocorr_sqv = tryCatch(Box.test(residuals(ARMA)^2, lag = log(length(x)), type = c("Ljung-Box"), fitdf = p+q)$p.value, error = function(e) NULL)
+
+      nums = paste(p, q, sep = ',')
+      
+      data = data.frame(values = c(nums, as.numeric(ARMA$bic), as.numeric(ARMA$loglik), as.numeric(autocorr), as.numeric(autocorr_sqv)))
+      
+      list = append(list, data.frame(data$values))
+      }
+  }
+   
+  this = data.frame(parameters = c('p, q', 'BIC', 'LogLikelihood', 'p_value', 'p_value^2'), list)
+  
+  h = rep('значения', 5*5)
+  names(this) = c('parameters', h)
+
+  print(this)
+}
+```
+
+Применим функцию: найдем оптимальные ARMA
+
+```{r}
+petro = archi(TABLE_pog_d$log_dif)
+petro = data.frame(t(petro)) %>% rownames_to_column() %>% select(-rowname) %>% column_to_rownames(var = 'X1')
+petro = petro[-c(1), ] 
+colnames(petro) = c('BIC', 'LogLikelihood', 'p_value', 'p_value^2')
+petro$p_value = as.numeric(petro$p_value)
+petro = petro %>% dplyr::filter(p_value > 0.05) %>% rownames_to_column(var = 'ARCH_coeff')
+#топ моделей по BIC:
+#ARMA(0,2)
+#ARMA(0,3)
+
+
+amour = archi(TABLE_al_d$log_dif)
+amour = data.frame(t(amour)) %>% rownames_to_column() %>% select(-rowname) %>% column_to_rownames(var = 'X1')
+amour = amour[-c(1), ] 
+colnames(amour) = c('BIC', 'LogLikelihood', 'p_value', 'p_value^2')
+amour$p_value = as.numeric(amour$p_value)
+amour = amour %>% dplyr::filter(p_value > 0.05) %>% rownames_to_column(var = 'ARCH_coeff')
+#топ моделей по BIC:
+#ARMA(0,1)
+#ARMA(1,0)
+```
+
+
+
+
+
+
+```{r}
+#[1:1396, ] - 1 model
+#[1396:2326, ] - 2 model
+#[1:697, ] - 3 model
+#[1:1116, ] - 4 model
+#[1:900, ] - 5 model
+#[1:1000, ] - 6 model
+
+
+# от 1080 до 1100 this problem is
+#[1:1100, ] - 7 model
+#[1:1050, ] - 8 model
+#[1:1070, ] - 9 model
+#[1:1080, ] - 10 model
+#[1:1095, ] - 11 model
+#[1:1097, ] - 12 model - только одно пи-вэлью больше 0.05
+#[1:1098, ] - 12 model
+```
+
+
+
+она пыталась..
+```{r}
+P_ma1 = as.numeric(Arima(TABLE_pog_d$log_dif, c(0, 0, 2), include.constant = TRUE, method = c("CSS-ML"))$coef[1])
+P_ma2 = as.numeric(Arima(TABLE_pog_d$log_dif, c(0, 0, 2), include.constant = TRUE, method = c("CSS-ML"))$coef[2])
+P_in = as.numeric(Arima(TABLE_pog_d$log_dif, c(0, 0, 2), include.constant = TRUE, method = c("CSS-ML"))$coef[3])
+
+spec = ugarchspec(variance.model = list(model = 'sGARCH', garchOrder = c(1, 1)), mean.model = list(ma = c(P_ma1, P_ma2), P_in, include.mean = TRUE), distribution.model = 'std')
+      garch.fit = ugarchfit(spec, x)
+
+Box.test(residuals(garch.fit), lag = log(length(x)), type = c("Ljung-Box"), fitdf = 2)
+
+
+auto.arima(TABLE_pog_d$log_dif)
+```
+
+
+
+#------------------------------------------------------------- линия ненужности
+
+
+Функция для построения оптимальных GARCH моделей
+(немного useless раз Пырлик сказал чисто garch(1,1) сравнивать)
+
+```{r}
+list = c()
+
+daamn = function(p, q, x){
+  
+  for (g1 in 0:3){
+    for (g2 in 0:3){
+  
+  for (type in c('sGARCH', 'eGARCH', 'gjrGARCH')) {
+    for (distribution in c('norm', 'std')){
+
+      spec = tryCatch(ugarchspec(variance.model = list(model = type, garchOrder = c(g1, g2)), mean.model = list(armaOrder = c(p, q), include.mean = TRUE), distribution.model = distribution), error = function(e) 'error')
+      garch.fit = tryCatch(ugarchfit(spec, x), error = function(e) 'error')
+      
+      LogLik = tryCatch((garch.fit@fit$LLH %>% round(digits = 2)), error = function(e) 'error')
+      
+      pvalue = tryCatch(Box.test(residuals(garch.fit), lag = log(length(x)), type = c("Ljung-Box"), fitdf = p+q)$p.value, error = function(e) 'error')
+      pvalue_sqv = tryCatch(Box.test(residuals(garch.fit)^2, lag = log(length(x)), type = c("Ljung-Box"), fitdf = p+q)$p.value, error = function(e) 'error')
+
+      g_coeff = paste(g1, g2, sep = ',')
+
+      data = data.frame(values = c(type, distribution, g_coeff, LogLik, as.numeric(pvalue), as.numeric(pvalue_sqv)))
+      list = append(list, data.frame(data$values))
+          }
+        }
+  
+    }
+  }
+  
+  this = data.frame(parameters = c('type', 'distribution', 'g1,g2', 'LogLikelihood', 'p-value', 'p-value_sqv'), list)
+  
+  print(this)
+
+}
+```
+
+Применим функцию: найдем оптимальные GARCH
+
+```{r}
+petro1 = data.frame(t  (data.frame(daamn(1, 2, TABLE_pog_d$log_dif)))  ) %>% rownames_to_column() %>% select(-rowname)
+
+garch_petro = data.frame(c(petro1[-1, ])) %>% na.omit() %>% rownames_to_column() %>% select(-rowname)
+
+garch_petro$X4 = as.numeric(garch_petro$X4) #%>% round(digits = 4)
+garch_petro$X5 = as.numeric(garch_petro$X5) #%>% round(digits = 4)
+garch_petro$X6 = as.numeric(garch_petro$X6) #%>% round(digits = 4)
+
+colnames(garch_petro) = c('type', 'distribution', 'g1,g2', 'LogLikelihood', 'res ARCH (1,2)', 'res^2 ARCH (1,2)')
+
+#сук ни один не подходит ...
+
+
+amour1 = data.frame(t  (data.frame(daamn(1, 1, TABLE_al_d$log_dif)))  ) %>% rownames_to_column() %>% select(-rowname)
+
+garch_amour = data.frame(c(amour1[-1, ])) %>% na.omit() %>% rownames_to_column() %>% select(-rowname)
+
+garch_amour$X4 = as.numeric(garch_amour$X4) #%>% round(digits = 4)
+garch_amour$X5 = as.numeric(garch_amour$X5) #%>% round(digits = 4)
+garch_amour$X6 = as.numeric(garch_amour$X6) #%>% round(digits = 4)
+
+colnames(garch_amour) = c('type', 'distribution', 'g1,g2', 'LogLikelihood', 'res ARCH (1,1)', 'res^2 ARCH (1,1)')
+
+#sGARCH(1,0) std + ARCH(1,1) --> p-value = 0.1091
+```
+
+Petropavlovsk PLC
+
+```{r}
+#проверяем на стационарность
+adf.test(log(pog$close), alternative = 'stationary', k = 1)
+#исходный стационарен, но на 10% уровне значимости..
+
+#чекаем разрывы двумя тестами
+p = log(pog$close)
+p_l1 = c(0, p[1:length(p) - 1])
+
+stat = Fstats(p ~ p_l1, from = 0.1, to = NULL)
+breakpoints(stat)$breakpoints
+sctest(stat, type = 'supF')
+#p-value < 0.05 разрыв есть, 30 июня 2021
+
+stat = breakpoints(p ~ p_l1)
+summary(stat)
+# 5 марта 2020
+```
+
+Amour Minerals Corporation
+
+```{r}
+#проверяем на стационарность
+adf.test(al$close, alternative = 'stationary', k = 1)
+#изначальный ряд стационарен
+
+#чекаем разрывы двумя тестами
+c = al$close
+c_l1 = c(0, c[1:length(c) - 1])
+
+stat = Fstats(c ~ c_l1, from = 0.1, to = NULL)
+breakpoints(stat)$breakpoints
+sctest(stat, type = 'supF')
+#p-value < 0.05 разрыв есть, 5 июня 2015
+
+stat = breakpoints(c ~ c_l1)
+summary(stat)
+# 15 июня 2015
+# 1 сентября 2016
+```
+
